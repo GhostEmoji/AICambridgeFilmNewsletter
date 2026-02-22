@@ -42,6 +42,7 @@ def scrape():
                 continue
             if today <= show_date < end_date:
                 week_showtimes.append({
+                    "date_iso": show_date_str,
                     "date": st["date"],
                     "time": st["time_format"],
                     "screen": st.get("ScreenName", ""),

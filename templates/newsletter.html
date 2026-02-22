@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Cambridge Cinema This Week</title>
 </head>
-<body style="margin:0; padding:0; background-color:#ffffff; font-family:Georgia, 'Times New Roman', serif;">
+<body style="margin:0; padding:0; background-color:#ffffff; font-family:Arial, Helvetica, sans-serif;">
 
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#ffffff;">
     <tr>
@@ -16,10 +16,10 @@
           <!-- Title -->
           <tr>
             <td style="padding:0 24px 16px; text-align:center;">
-              <h1 style="margin:0; font-size:22px; font-weight:normal; color:#1a1a2e; letter-spacing:1px;">
+              <h1 style="margin:0; font-size:22px; font-weight:normal; color:#1a1a2e; letter-spacing:1px; font-family:Arial, Helvetica, sans-serif;">
                 Cambridge Cinema
               </h1>
-              <p style="margin:4px 0 0; font-size:13px; color:#999;">
+              <p style="margin:4px 0 0; font-size:13px; color:#595959;">
                 Week of {{ date }}
               </p>
             </td>
@@ -37,25 +37,25 @@
                   </td>
                   {% endif %}
                   <td valign="top">
-                    <h3 style="margin:0 0 3px; font-size:15px; color:#1a1a2e;">
+                    <h3 style="margin:0 0 3px; font-size:15px; color:#1a1a2e; font-family:Arial, Helvetica, sans-serif;">
                       {{ film.title }}
                     </h3>
                     {% if film.rating %}
-                    <p style="margin:0 0 3px; font-size:12px; color:#e8c547;">
+                    <p style="margin:0 0 3px; font-size:12px; color:#8a6d00;">
                       &#9733; {{ "%.1f"|format(film.rating) }}/10
                     </p>
                     {% endif %}
                     {% if film.description %}
-                    <p style="margin:0 0 6px; font-size:12px; color:#666; line-height:1.4;">
+                    <p style="margin:0 0 6px; font-size:12px; color:#4a4a4a; line-height:1.4;">
                       {{ film.description }}
                     </p>
                     {% endif %}
-                    <p style="margin:0 0 3px; font-size:12px; color:#888; font-family:Arial,sans-serif;">
-                      {{ film.dates | join(" &middot; ") }}
+                    <p style="margin:0 0 3px; font-size:12px; color:#595959;">
+                      {{ film.dates | join(" · ") }}
                     </p>
-                    <p style="margin:0; font-size:12px; font-family:Arial,sans-serif;">
+                    <p style="margin:0; font-size:12px;">
                       {% for cinema, url in film.cinemas.items() %}
-                      <a href="{{ url }}" style="color:#1a6db5; text-decoration:none;">{{ cinema }}</a>{% if not loop.last %} &middot; {% endif %}
+                      <a href="{{ url }}" style="color:#0b5cab; text-decoration:none;">{{ cinema }}</a>{% if not loop.last %} · {% endif %}
                       {% endfor %}
                     </p>
                   </td>
@@ -68,11 +68,11 @@
           <!-- Footer -->
           <tr>
             <td style="padding:16px 24px 8px; text-align:center;">
-              <p style="margin:0; color:#bbb; font-size:11px; font-family:Arial,sans-serif;">
+              <p style="margin:0; color:#595959; font-size:11px;">
                 Compiled automatically from
-                <a href="https://www.picturehouses.com/cinema/arts-picturehouse-cambridge" style="color:#999;">Arts Picturehouse</a>,
-                <a href="https://www.everymancinema.com/venues-list/g02am-everyman-cambridge" style="color:#999;">Everyman</a> &amp;
-                <a href="https://cambridge.thelight.co.uk" style="color:#999;">The Light</a>
+                <a href="https://www.picturehouses.com/cinema/arts-picturehouse-cambridge" style="color:#0b5cab;">Arts Picturehouse</a>,
+                <a href="https://www.everymancinema.com/venues-list/g02am-everyman-cambridge" style="color:#0b5cab;">Everyman</a> &amp;
+                <a href="https://cambridge.thelight.co.uk" style="color:#0b5cab;">The Light</a>
               </p>
             </td>
           </tr>

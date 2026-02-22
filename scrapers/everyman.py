@@ -93,6 +93,7 @@ def scrape():
                         break
 
                 week_showtimes.append({
+                    "date_iso": date_str,
                     "date": display_date,
                     "time": time_str,
                     "screen": "",

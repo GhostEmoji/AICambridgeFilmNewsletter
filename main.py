@@ -97,12 +97,16 @@ def merge_films(films):
         cinema = film["cinema"]
         entry["cinemas"][cinema] = film.get("url", CINEMA_URLS.get(cinema, ""))
         for st in film.get("showtimes", []):
-            entry["dates"].add(st["date"])
+            entry["dates"].add(st["date_iso"])
 
-    # Sort dates and convert to list
+    # Sort dates chronologically and format for display
     result = []
     for entry in merged.values():
-        entry["dates"] = sorted(entry["dates"])
+        sorted_isos = sorted(entry["dates"])
+        entry["dates"] = [
+            datetime.strptime(d, "%Y-%m-%d").strftime("%a %d %b")
+            for d in sorted_isos
+        ]
         result.append(entry)
     return result
 

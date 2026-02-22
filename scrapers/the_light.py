@@ -93,6 +93,7 @@ def scrape():
                 format_display = session.get("FormatDisplay", "2D")
 
                 week_showtimes.append({
+                    "date_iso": show_date.strftime("%Y-%m-%d"),
                     "date": display_date,
                     "time": time_display,
                     "screen": format_display,
