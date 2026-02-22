@@ -104,7 +104,7 @@ def merge_films(films):
     for entry in merged.values():
         sorted_isos = sorted(entry["dates"])
         entry["dates"] = [
-            datetime.strptime(d, "%Y-%m-%d").strftime("%a %d %b")
+            datetime.strptime(d, "%Y-%m-%d").strftime("%a %d")
             for d in sorted_isos
         ]
         result.append(entry)
