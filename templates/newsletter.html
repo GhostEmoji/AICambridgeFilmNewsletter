@@ -5,104 +5,74 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Cambridge Cinema This Week</title>
 </head>
-<body style="margin:0; padding:0; background-color:#f5f5f5; font-family:Georgia, 'Times New Roman', serif;">
+<body style="margin:0; padding:0; background-color:#ffffff; font-family:Georgia, 'Times New Roman', serif;">
 
-  <!-- Wrapper -->
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f5f5f5;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#ffffff;">
     <tr>
       <td align="center" style="padding:20px 10px;">
 
-        <!-- Main container -->
-        <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="background-color:#ffffff; max-width:600px; width:100%;">
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px; width:100%;">
 
-          <!-- Header -->
+          <!-- Title -->
           <tr>
-            <td style="background-color:#1a1a2e; padding:30px 24px; text-align:center;">
-              <h1 style="margin:0; color:#ffffff; font-size:24px; font-weight:normal; letter-spacing:1px;">
+            <td style="padding:0 24px 16px; text-align:center;">
+              <h1 style="margin:0; font-size:22px; font-weight:normal; color:#1a1a2e; letter-spacing:1px;">
                 Cambridge Cinema
               </h1>
-              <p style="margin:8px 0 0; color:#a0a0b0; font-size:14px;">
+              <p style="margin:4px 0 0; font-size:13px; color:#999;">
                 Week of {{ date }}
               </p>
             </td>
           </tr>
 
-          {% for cinema_name, films in cinemas.items() %}
-          <!-- Cinema section: {{ cinema_name }} -->
-          <tr>
-            <td style="padding:24px 24px 8px;">
-              <h2 style="margin:0; font-size:20px; color:#1a1a2e; border-bottom:2px solid #e8c547; padding-bottom:8px;">
-                {{ cinema_name }}
-              </h2>
-            </td>
-          </tr>
-
           {% for film in films %}
-          <!-- Film: {{ film.title }} -->
           <tr>
-            <td style="padding:16px 24px;">
+            <td style="padding:12px 24px;">
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
                 <tr>
                   {% if film.tmdb_poster or film.image_url %}
-                  <td width="80" valign="top" style="padding-right:16px;">
-                    <img src="{{ film.tmdb_poster or film.image_url }}" alt="" width="80"
-                         style="border-radius:4px; display:block;">
+                  <td width="60" valign="top" style="padding-right:14px;">
+                    <img src="{{ film.tmdb_poster or film.image_url }}" alt="" width="60"
+                         style="border-radius:3px; display:block;">
                   </td>
                   {% endif %}
                   <td valign="top">
-                    <h3 style="margin:0 0 4px; font-size:16px;">
-                      <a href="{{ film.url }}" style="color:#1a1a2e; text-decoration:none;">
-                        {{ film.title }}
-                      </a>
+                    <h3 style="margin:0 0 3px; font-size:15px; color:#1a1a2e;">
+                      {{ film.title }}
                     </h3>
                     {% if film.rating %}
-                    <p style="margin:0 0 4px; font-size:13px; color:#e8c547;">
+                    <p style="margin:0 0 3px; font-size:12px; color:#e8c547;">
                       &#9733; {{ "%.1f"|format(film.rating) }}/10
                     </p>
                     {% endif %}
                     {% if film.description %}
-                    <p style="margin:0 0 8px; font-size:13px; color:#555; line-height:1.4;">
+                    <p style="margin:0 0 6px; font-size:12px; color:#666; line-height:1.4;">
                       {{ film.description }}
                     </p>
                     {% endif %}
-
-                    <!-- Showtimes grouped by date -->
-                    {% set dates = film.showtimes|group_by_date %}
-                    {% for date, showings in dates.items() %}
-                    <p style="margin:0 0 2px; font-size:12px; color:#888;">{{ date }}</p>
-                    <p style="margin:0 0 8px; font-size:13px;">
-                      {% for st in showings %}
-                      <a href="{{ st.booking_url or film.url }}"
-                         style="display:inline-block; background-color:#f0f0f0; color:#333; text-decoration:none; padding:3px 8px; border-radius:3px; margin:0 4px 4px 0; font-size:12px; font-family:Arial,sans-serif;{% if st.sold_out %} opacity:0.5; text-decoration:line-through;{% endif %}">
-                        {{ st.time }}
-                      </a>
+                    <p style="margin:0 0 3px; font-size:12px; color:#888; font-family:Arial,sans-serif;">
+                      {{ film.dates | join(" &middot; ") }}
+                    </p>
+                    <p style="margin:0; font-size:12px; font-family:Arial,sans-serif;">
+                      {% for cinema, url in film.cinemas.items() %}
+                      <a href="{{ url }}" style="color:#1a6db5; text-decoration:none;">{{ cinema }}</a>{% if not loop.last %} &middot; {% endif %}
                       {% endfor %}
                     </p>
-                    {% endfor %}
                   </td>
                 </tr>
               </table>
-
-              {% if not loop.last %}
-              <hr style="border:none; border-top:1px solid #eee; margin:16px 0 0;">
-              {% endif %}
             </td>
           </tr>
           {% endfor %}
 
-          {% if not loop.last %}
-          <tr><td style="height:8px;"></td></tr>
-          {% endif %}
-          {% endfor %}
-
           <!-- Footer -->
           <tr>
-            <td style="background-color:#1a1a2e; padding:20px 24px; text-align:center;">
-              <p style="margin:0; color:#a0a0b0; font-size:12px; font-family:Arial,sans-serif;">
+            <td style="padding:16px 24px 8px; text-align:center;">
+              <p style="margin:0; color:#bbb; font-size:11px; font-family:Arial,sans-serif;">
                 Compiled automatically from
-                <a href="https://www.picturehouses.com/cinema/arts-picturehouse-cambridge" style="color:#e8c547;">Arts Picturehouse</a>,
-                <a href="https://www.everymancinema.com/venues-list/g02am-everyman-cambridge" style="color:#e8c547;">Everyman</a> &amp;
-                <a href="https://cambridge.thelight.co.uk" style="color:#e8c547;">The Light</a>
+                <a href="https://www.picturehouses.com/cinema/arts-picturehouse-cambridge" style="color:#999;">Arts Picturehouse</a>,
+                <a href="https://www.everymancinema.com/venues-list/g02am-everyman-cambridge" style="color:#999;">Everyman</a> &amp;
+                <a href="https://cambridge.thelight.co.uk" style="color:#999;">The Light</a>
               </p>
             </td>
           </tr>

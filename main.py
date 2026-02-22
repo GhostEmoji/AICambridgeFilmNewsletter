@@ -60,43 +60,63 @@ def enrich_with_tmdb(films, api_key):
     return films
 
 
-# --- Group films by cinema ---
+# --- Merge films across cinemas ---
 
-def group_by_cinema(films):
-    """Group films by cinema name, preserving order."""
-    cinemas = {}
+CINEMA_URLS = {
+    "Arts Picturehouse": "https://www.picturehouses.com/cinema/arts-picturehouse-cambridge",
+    "Everyman": "https://www.everymancinema.com/venues-list/g02am-everyman-cambridge",
+    "The Light": "https://cambridge.thelight.co.uk",
+}
+
+
+def merge_films(films):
+    """Merge the same film across cinemas into a single entry with per-cinema info."""
+    merged = {}
     for film in films:
+        # Normalise title for matching
+        key = film["title"].lower().strip()
+        if key not in merged:
+            merged[key] = {
+                "title": film["title"],
+                "description": film.get("description", ""),
+                "rating": film.get("rating"),
+                "tmdb_poster": film.get("tmdb_poster", ""),
+                "image_url": film.get("image_url", ""),
+                "cinemas": {},
+                "dates": set(),
+            }
+        entry = merged[key]
+        # Carry over TMDB data if this copy has it
+        if film.get("description") and not entry["description"]:
+            entry["description"] = film["description"]
+        if film.get("rating") and not entry["rating"]:
+            entry["rating"] = film["rating"]
+        if film.get("tmdb_poster") and not entry["tmdb_poster"]:
+            entry["tmdb_poster"] = film["tmdb_poster"]
+
         cinema = film["cinema"]
-        if cinema not in cinemas:
-            cinemas[cinema] = []
-        cinemas[cinema].append(film)
-    return cinemas
+        entry["cinemas"][cinema] = film.get("url", CINEMA_URLS.get(cinema, ""))
+        for st in film.get("showtimes", []):
+            entry["dates"].add(st["date"])
 
-
-# --- Group showtimes by date ---
-
-def group_showtimes_by_date(showtimes):
-    """Group a flat list of showtimes into {date: [showtimes]}."""
-    by_date = {}
-    for st in showtimes:
-        date = st["date"]
-        if date not in by_date:
-            by_date[date] = []
-        by_date[date].append(st)
-    return by_date
+    # Sort dates and convert to list
+    result = []
+    for entry in merged.values():
+        entry["dates"] = sorted(entry["dates"])
+        result.append(entry)
+    return result
 
 
 # --- Render email ---
 
-def render_email(cinemas, date_str):
+def render_email(films, date_str):
     """Render the newsletter HTML from the template."""
     env = Environment(
         loader=FileSystemLoader(os.path.join(os.path.dirname(__file__), "templates")),
         autoescape=True,
     )
-    env.filters["group_by_date"] = group_showtimes_by_date
     template = env.get_template("newsletter.html")
-    return template.render(cinemas=cinemas, date=date_str)
+    return template.render(films=films, date=date_str)
 
 
 # --- Send email ---
@@ -160,9 +180,10 @@ def main():
 
     # Step 3: Render
     print("Rendering email...")
-    cinemas = group_by_cinema(all_films)
+    merged = merge_films(all_films)
+    print(f"  {len(merged)} unique films across all cinemas")
     date_str = datetime.now().strftime("%d %b %Y")
-    html = render_email(cinemas, date_str)
+    html = render_email(merged, date_str)
 
     # Step 4: Send
     print("Sending email...")
