@@ -108,6 +108,7 @@ def merge_films(films):
             for d in sorted_isos
         ]
         result.append(entry)
+    result.sort(key=lambda f: (-len(f["dates"]), f["title"].lower()))
     return result
 
 
