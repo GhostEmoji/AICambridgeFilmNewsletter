@@ -1,0 +1,27 @@
+name: Send Cambridge Film Newsletter
+
+on:
+  schedule:
+    - cron: '0 8 * * 2'  # Every Tuesday at 8am UTC
+  workflow_dispatch:       # Manual trigger for testing
+
+jobs:
+  send-newsletter:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run newsletter
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+          TO_EMAILS: ${{ secrets.TO_EMAILS }}
+          FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
+        run: python main.py
