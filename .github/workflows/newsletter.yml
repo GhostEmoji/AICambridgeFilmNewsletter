@@ -3,7 +3,7 @@ name: Send Cambridge Film Newsletter
 on:
   schedule:
     - cron: '0 8 * * 2'  # Every Tuesday at 8am UTC
-  workflow_dispatch:       # Manual trigger for testing
+  workflow_dispatch:  # Manual trigger for testing
 
 jobs:
   send-newsletter:
