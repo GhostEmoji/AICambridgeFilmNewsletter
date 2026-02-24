@@ -2,7 +2,7 @@ name: Send Cambridge Film Newsletter
 
 on:
   schedule:
-    - cron: '0 10 * * 2'  # Every Tuesday at 10am UTC
+    - cron: '52 9 * * 2'  # Every Tuesday at 9:52am UTC
   workflow_dispatch:  # Manual trigger for testing
 
 jobs:
