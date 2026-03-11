@@ -2,11 +2,15 @@
 
 import os
 import sys
+import time
 from datetime import datetime
 
 import requests
-import resend
+# import resend
 from jinja2 import Environment, FileSystemLoader
+
+import smtplib
+from email.mime.text import MIMEText
 
 from scrapers import picturehouse, everyman, the_light
 
@@ -127,34 +131,49 @@ def render_email(films, date_str):
 # --- Send email ---
 
 def send_email(html, to_emails, from_email):
-    """Send the newsletter via Resend."""
+    """Send the newsletter via Gmail."""
     date_str = datetime.now().strftime("%d %b %Y")
-    for email in to_emails:
-        resend.Emails.send({
-            "from": from_email,
-            "to": email.strip(),
-            "subject": f"Cambridge Cinema This Week — {date_str}",
-            "html": html,
-        })
-        print(f"  Sent to {email.strip()}")
+    gmail_app_password = os.environ.get("GMAIL_APP_PASSWORD", "")
 
+    msg = MIMEText(html, "html")
+    msg["Subject"] = f"Cambridge Cinema This Week — {date_str}"
+    msg["From"] = "cambridgecinemashowings@gmail.com"
+    msg["To"] = "cambridge-cinema-showings@googlegroups.com"
+
+    with smtplib.SMTP("smtp.gmail.com", 587) as server:
+        server.starttls()
+        server.login("cambridgecinemashowings@gmail.com", gmail_app_password)
+        server.send_message(msg)
+
+    print(f"  Sent to {msg["To"]}")
+
+    # for i, email in enumerate(to_emails):
+    #     if i > 0:
+    #         time.sleep(1)
+    #     resend.Emails.send({
+    #         "from": from_email,
+    #         "to": email.strip(),
+    #         "subject": f"Cambridge Cinema This Week — {date_str}",
+    #         "html": html,
+    #     })
+    #     print(f"  Sent to {email.strip()}")
 
 # --- Main ---
 
 def main():
     tmdb_key = os.environ.get("TMDB_API_KEY", "")
-    resend_key = os.environ.get("RESEND_API_KEY", "")
+    # resend_key = os.environ.get("RESEND_API_KEY", "")
     to_emails_str = os.environ.get("TO_EMAILS", "")
     from_email = os.environ.get("FROM_EMAIL", "Cambridge Films <newsletter@resend.dev>")
 
-    if not resend_key:
-        print("ERROR: RESEND_API_KEY not set")
-        sys.exit(1)
-    if not to_emails_str:
-        print("ERROR: TO_EMAILS not set")
-        sys.exit(1)
+    # if not resend_key:
+    #     print("ERROR: RESEND_API_KEY not set")
+    #     sys.exit(1)
+    # if not to_emails_str:
+    #     print("ERROR: TO_EMAILS not set")
+    #     sys.exit(1)
 
-    resend.api_key = resend_key
+    # resend.api_key = resend_key
     to_emails = [e.strip() for e in to_emails_str.split(",") if e.strip()]
 
     # Step 1: Scrape
