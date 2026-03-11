@@ -145,7 +145,7 @@ def send_email(html, to_emails, from_email):
         server.login("cambridgecinemashowings@gmail.com", gmail_app_password)
         server.send_message(msg)
 
-    print(f"  Sent to {msg["To"]}")
+    print(f"  Sent to {msg['To']}")
 
     # for i, email in enumerate(to_emails):
     #     if i > 0:
