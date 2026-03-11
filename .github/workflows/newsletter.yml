@@ -24,4 +24,5 @@ jobs:
           TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
           TO_EMAILS: ${{ secrets.TO_EMAILS }}
           FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
         run: python main.py
