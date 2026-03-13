@@ -136,8 +136,8 @@ def send_email(html, to_emails, from_email):
     gmail_app_password = os.environ.get("GMAIL_APP_PASSWORD", "")
 
     msg = MIMEText(html, "html")
-    msg["Subject"] = f"Cambridge Cinema This Week — {date_str}"
-    msg["From"] = "cambridgecinemashowings@gmail.com"
+    msg["Subject"] = f"Films This Week — {date_str}"
+    msg["From"] = "Cambridge Cinema Showings"
     msg["To"] = "cambridge-cinema-showings@googlegroups.com"
 
     with smtplib.SMTP("smtp.gmail.com", 587) as server:
