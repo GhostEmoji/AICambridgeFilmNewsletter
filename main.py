@@ -1,5 +1,6 @@
 """Cambridge Film Newsletter — scrape, enrich, render, send."""
 
+import argparse
 import os
 import sys
 import time
@@ -130,15 +131,22 @@ def render_email(films, date_str):
 
 # --- Send email ---
 
-def send_email(html, to_emails, from_email):
+def send_email(html, to_emails, from_email, test=False):
     """Send the newsletter via Gmail."""
     date_str = datetime.now().strftime("%d %b %Y")
     gmail_app_password = os.environ.get("GMAIL_APP_PASSWORD", "")
 
+    if test:
+        recipient = "louisemclennan@gmail.com"
+        subject = f"[TEST] Films This Week — {date_str}"
+    else:
+        recipient = "cambridge-cinema-showings@googlegroups.com"
+        subject = f"Films This Week — {date_str}"
+
     msg = MIMEText(html, "html")
-    msg["Subject"] = f"Films This Week — {date_str}"
+    msg["Subject"] = subject
     msg["From"] = "Cambridge Cinema Showings"
-    msg["To"] = "cambridge-cinema-showings@googlegroups.com"
+    msg["To"] = recipient
 
     with smtplib.SMTP("smtp.gmail.com", 587) as server:
         server.starttls()
@@ -161,6 +169,11 @@ def send_email(html, to_emails, from_email):
 # --- Main ---
 
 def main():
+    parser = argparse.ArgumentParser(description="Cambridge Film Newsletter")
+    parser.add_argument("--test", action="store_true",
+                        help="Send to TEST_EMAIL only instead of the subscriber list")
+    args = parser.parse_args()
+
     tmdb_key = os.environ.get("TMDB_API_KEY", "")
     # resend_key = os.environ.get("RESEND_API_KEY", "")
     to_emails_str = os.environ.get("TO_EMAILS", "")
@@ -210,8 +223,11 @@ def main():
     html = render_email(merged, date_str)
 
     # Step 4: Send
-    print("Sending email...")
-    send_email(html, to_emails, from_email)
+    if args.test:
+        print("Sending TEST email...")
+    else:
+        print("Sending email...")
+    send_email(html, to_emails, from_email, test=args.test)
 
     print("Done!")
 

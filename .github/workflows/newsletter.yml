@@ -3,7 +3,13 @@ name: Send Cambridge Film Newsletter
 on:
   schedule:
     - cron: '52 9 * * 2'  # Every Tuesday at 9:52am UTC
-  workflow_dispatch:  # Manual trigger for testing
+  workflow_dispatch:
+    inputs:
+      test:
+        description: 'Send only to test address (not subscribers)'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   send-newsletter:
@@ -25,4 +31,4 @@ jobs:
           TO_EMAILS: ${{ secrets.TO_EMAILS }}
           FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
-        run: python main.py
+        run: python main.py ${{ github.event.inputs.test == 'true' && '--test' || '' }}
