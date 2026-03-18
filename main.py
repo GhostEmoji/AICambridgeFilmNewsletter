@@ -50,14 +50,35 @@ def enrich_with_tmdb(films, api_key):
         enrichment = {}
         if results:
             top = results[0]
+            movie_id = top["id"]
             overview = top.get("overview", "")
             if len(overview) > 120:
                 overview = overview[:117] + "..."
             enrichment["description"] = overview
             enrichment["rating"] = top.get("vote_average")
+            enrichment["tmdb_url"] = f"https://www.themoviedb.org/movie/{movie_id}"
             poster_path = top.get("poster_path")
             if poster_path:
                 enrichment["tmdb_poster"] = f"https://image.tmdb.org/t/p/w200{poster_path}"
+
+            # Fetch GB age rating
+            try:
+                rd_resp = requests.get(
+                    f"{TMDB_BASE}/movie/{movie_id}/release_dates",
+                    params={"api_key": api_key},
+                    timeout=10,
+                )
+                rd_resp.raise_for_status()
+                for country in rd_resp.json().get("results", []):
+                    if country["iso_3166_1"] == "GB":
+                        for rel in country["release_dates"]:
+                            cert = rel.get("certification", "")
+                            if cert:
+                                enrichment["age_rating"] = cert
+                                break
+                        break
+            except requests.RequestException:
+                pass
 
         seen_titles[title] = enrichment
         film.update(enrichment)
@@ -85,7 +106,9 @@ def merge_films(films):
                 "title": film["title"],
                 "description": film.get("description", ""),
                 "rating": film.get("rating"),
+                "tmdb_url": film.get("tmdb_url", ""),
                 "tmdb_poster": film.get("tmdb_poster", ""),
+                "age_rating": film.get("age_rating", ""),
                 "image_url": film.get("image_url", ""),
                 "cinemas": {},
                 "dates": set(),
@@ -96,8 +119,12 @@ def merge_films(films):
             entry["description"] = film["description"]
         if film.get("rating") and not entry["rating"]:
             entry["rating"] = film["rating"]
+        if film.get("tmdb_url") and not entry["tmdb_url"]:
+            entry["tmdb_url"] = film["tmdb_url"]
         if film.get("tmdb_poster") and not entry["tmdb_poster"]:
             entry["tmdb_poster"] = film["tmdb_poster"]
+        if film.get("age_rating") and not entry["age_rating"]:
+            entry["age_rating"] = film["age_rating"]
 
         cinema = film["cinema"]
         entry["cinemas"][cinema] = film.get("url", CINEMA_URLS.get(cinema, ""))
