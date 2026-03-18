@@ -86,6 +86,19 @@ def enrich_with_tmdb(films, api_key):
     return films
 
 
+# --- Age rating colours (WCAG AA contrast) ---
+
+AGE_RATING_COLOURS = {
+    "U":   {"bg": "#1b8a2a", "text": "#ffffff"},
+    "PG":  {"bg": "#c98f00", "text": "#ffffff"},
+    "12":  {"bg": "#d4710a", "text": "#ffffff"},
+    "12A": {"bg": "#d4710a", "text": "#ffffff"},
+    "15":  {"bg": "#c43e00", "text": "#ffffff"},
+    "18":  {"bg": "#c82333", "text": "#ffffff"},
+}
+DEFAULT_RATING_COLOUR = {"bg": "#6c757d", "text": "#ffffff"}
+
+
 # --- Merge films across cinemas ---
 
 CINEMA_URLS = {
@@ -139,6 +152,9 @@ def merge_films(films):
             datetime.strptime(d, "%Y-%m-%d").strftime("%a %d")
             for d in sorted_isos
         ]
+        colours = AGE_RATING_COLOURS.get(entry["age_rating"], DEFAULT_RATING_COLOUR)
+        entry["age_rating_bg"] = colours["bg"]
+        entry["age_rating_text"] = colours["text"]
         result.append(entry)
     result.sort(key=lambda f: (-len(f["dates"]), f["title"].lower()))
     return result

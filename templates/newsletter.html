@@ -40,13 +40,9 @@
                     <h3 style="margin:0 0 3px; font-size:15px; color:#1a1a2e; font-family:Arial, Helvetica, sans-serif;">
                       {{ film.title }}
                     </h3>
-                    {% if film.rating %}
+                    {% if film.rating or film.age_rating %}
                     <p style="margin:0 0 3px; font-size:12px; color:#8a6d00;">
-                      {% if film.tmdb_url %}<a href="{{ film.tmdb_url }}" style="color:#8a6d00; text-decoration:none;">&#9733; {{ "%.1f"|format(film.rating) }}/10</a>{% else %}&#9733; {{ "%.1f"|format(film.rating) }}/10{% endif %}{% if film.age_rating %} · <span style="color:#595959;">{{ film.age_rating }}</span>{% endif %}
-                    </p>
-                    {% elif film.age_rating %}
-                    <p style="margin:0 0 3px; font-size:12px; color:#595959;">
-                      {{ film.age_rating }}
+                      {% if film.rating %}{% if film.tmdb_url %}<a href="{{ film.tmdb_url }}" style="color:#8a6d00; text-decoration:none;">&#9733; {{ "%.1f"|format(film.rating) }}/10</a>{% else %}&#9733; {{ "%.1f"|format(film.rating) }}/10{% endif %}{% endif %}{% if film.age_rating %}{% if film.rating %} {% endif %}<span style="display:inline-block; background-color:{{ film.age_rating_bg }}; color:{{ film.age_rating_text }}; font-size:10px; font-weight:bold; padding:1px 6px; border-radius:3px; vertical-align:middle; line-height:16px;">{{ film.age_rating }}</span>{% endif %}
                     </p>
                     {% endif %}
                     {% if film.description %}
