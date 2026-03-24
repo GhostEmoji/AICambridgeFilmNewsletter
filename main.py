@@ -1,10 +1,11 @@
 """Cambridge Film Newsletter — scrape, enrich, render, send."""
 
 import argparse
+import json
 import os
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 import requests
 # import resend
@@ -148,6 +149,7 @@ def merge_films(films):
     result = []
     for entry in merged.values():
         sorted_isos = sorted(entry["dates"])
+        entry["dates_iso"] = sorted_isos
         entry["dates"] = [
             datetime.strptime(d, "%Y-%m-%d").strftime("%a %d")
             for d in sorted_isos
@@ -158,6 +160,33 @@ def merge_films(films):
         result.append(entry)
     result.sort(key=lambda f: (-len(f["dates"]), f["title"].lower()))
     return result
+
+
+# --- Export JSON ---
+
+def export_json(films, path):
+    """Write film showings to a JSON file for the website."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    payload = {
+        "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "films": [
+            {
+                "title": f["title"],
+                "description": f["description"],
+                "rating": f["rating"],
+                "tmdb_url": f["tmdb_url"],
+                "tmdb_poster": f["tmdb_poster"],
+                "age_rating": f["age_rating"],
+                "image_url": f["image_url"],
+                "cinemas": f["cinemas"],
+                "dates": f["dates_iso"],
+            }
+            for f in films
+        ],
+    }
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh, indent=2, ensure_ascii=False)
+    print(f"  Written {path}")
 
 
 # --- Render email ---
@@ -265,7 +294,11 @@ def main():
     date_str = datetime.now().strftime("%d %b %Y")
     html = render_email(merged, date_str)
 
-    # Step 4: Send
+    # Step 4: Export JSON
+    print("Exporting JSON...")
+    export_json(merged, "data/showings.json")
+
+    # Step 5: Send
     if args.test:
         print("Sending TEST email...")
     else:
