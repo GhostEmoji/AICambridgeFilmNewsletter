@@ -6,6 +6,8 @@ import requests
 from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 
+from scrapers import make_session
+
 
 NOW_SHOWING_URL = "https://cambridge.thelight.co.uk/cinema/nowshowing"
 BASE_URL = "https://cambridge.thelight.co.uk"
@@ -14,7 +16,7 @@ CINEMA_NAME = "The Light"
 
 def scrape():
     """Return a list of films showing at The Light Cambridge this week."""
-    response = requests.get(
+    response = make_session().get(
         NOW_SHOWING_URL,
         headers={
             "User-Agent": "Mozilla/5.0 (compatible; CambridgeFilmNewsletter/1.0)",

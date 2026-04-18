@@ -4,6 +4,8 @@ import re
 import requests
 from datetime import datetime, timedelta
 
+from scrapers import make_session
+
 
 API_URL = "https://www.picturehouses.com/api/scheduled-movies-ajax"
 CINEMA_ID = "002"
@@ -12,7 +14,7 @@ CINEMA_NAME = "Arts Picturehouse"
 
 def scrape():
     """Return a list of films showing at Arts Picturehouse Cambridge this week."""
-    response = requests.post(
+    response = make_session().post(
         API_URL,
         data={"cinema_id": CINEMA_ID},
         headers={

@@ -6,6 +6,8 @@ import urllib.parse
 import requests
 from datetime import datetime, timedelta
 
+from scrapers import make_session
+
 
 SCHEDULE_URL = "https://www.everymancinema.com/api/gatsby-source-boxofficeapi/schedule"
 MOVIES_URL = "https://www.everymancinema.com/api/gatsby-source-boxofficeapi/movies"
@@ -21,7 +23,8 @@ def scrape():
 
     # Step 1: Get schedule
     theaters_param = json.dumps({"id": THEATER_ID, "timeZone": TIMEZONE}, separators=(",", ":"))
-    schedule_resp = requests.get(
+    session = make_session()
+    schedule_resp = session.get(
         SCHEDULE_URL,
         params={
             "theaters": theaters_param,
@@ -44,7 +47,7 @@ def scrape():
 
     # Step 2: Get movie metadata
     movie_ids = list(schedule.keys())
-    movies_resp = requests.get(
+    movies_resp = session.get(
         MOVIES_URL,
         params=[("ids", mid) for mid in movie_ids],
         headers={
