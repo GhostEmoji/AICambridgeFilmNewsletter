@@ -25,6 +25,16 @@
             </td>
           </tr>
 
+          {% if failed_cinemas %}
+          <tr>
+            <td style="padding:0 24px 12px;">
+              <p style="margin:0; padding:8px 12px; background-color:#fff4e5; border-left:3px solid #d4710a; color:#6b4500; font-size:12px; line-height:1.4;">
+                Couldn't fetch listings from {{ failed_cinemas | join(", ") }} this week — showings may be incomplete.
+              </p>
+            </td>
+          </tr>
+          {% endif %}
+
           {% for film in films %}
           <tr>
             <td style="padding:12px 24px;">

@@ -237,14 +237,14 @@ def export_json(films, path):
 
 # --- Render email ---
 
-def render_email(films, date_str):
+def render_email(films, date_str, failed_cinemas=None):
     """Render the newsletter HTML from the template."""
     env = Environment(
         loader=FileSystemLoader(os.path.join(os.path.dirname(__file__), "templates")),
         autoescape=True,
     )
     template = env.get_template("newsletter.html")
-    return template.render(films=films, date=date_str)
+    return template.render(films=films, date=date_str, failed_cinemas=failed_cinemas or [])
 
 
 # --- Send email ---
@@ -317,6 +317,7 @@ def main():
         ("The Light", the_light.scrape),
     ]
 
+    failed_cinemas = []
     for name, scrape_fn in scrapers:
         try:
             films = scrape_fn()
@@ -324,6 +325,7 @@ def main():
             all_films.extend(films)
         except Exception as e:
             print(f"  {name}: FAILED — {e}")
+            failed_cinemas.append(name)
 
     if not all_films:
         print("No films found from any cinema. Exiting.")
@@ -338,7 +340,7 @@ def main():
     merged = merge_films(all_films)
     print(f"  {len(merged)} unique films across all cinemas")
     date_str = datetime.now().strftime("%d %b %Y")
-    html = render_email(merged, date_str)
+    html = render_email(merged, date_str, failed_cinemas)
 
     # Step 4: Export JSON
     print("Exporting JSON...")
