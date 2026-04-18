@@ -23,6 +23,8 @@ from scrapers import picturehouse, everyman, the_light
 
 TMDB_BASE = "https://api.themoviedb.org/3"
 TITLE_MATCH_THRESHOLD = 0.6
+PLAUSIBILITY_AGE_YEARS = 3
+PLAUSIBILITY_MIN_VOTES = 100
 
 
 def _normalise_title(t):
@@ -38,11 +40,26 @@ def _title_similarity(query, candidate):
     ).ratio()
 
 
+def _is_plausible(candidate, today=None):
+    """Reject films that are both old AND obscure — unlikely Cambridge showings."""
+    try:
+        release = datetime.strptime(candidate.get("release_date", ""), "%Y-%m-%d").date()
+    except ValueError:
+        return True  # unknown date — give benefit of the doubt
+    today = today or datetime.now().date()
+    age_years = (today - release).days / 365.25
+    if age_years <= PLAUSIBILITY_AGE_YEARS:
+        return True  # recent enough that low vote counts are expected
+    return candidate.get("vote_count", 0) >= PLAUSIBILITY_MIN_VOTES
+
+
 def _best_tmdb_match(query_title, results, limit=5):
     """Pick the top-N result whose title best matches the query, or None."""
     best = None
     best_score = 0.0
     for candidate in results[:limit]:
+        if not _is_plausible(candidate):
+            continue
         score = max(
             _title_similarity(query_title, candidate.get("title", "")),
             _title_similarity(query_title, candidate.get("original_title", "")),
