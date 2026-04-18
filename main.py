@@ -126,6 +126,7 @@ def merge_films(films):
                 "image_url": film.get("image_url", ""),
                 "cinemas": {},
                 "dates": set(),
+                "showtimes": [],
             }
         entry = merged[key]
         # Carry over TMDB data if this copy has it
@@ -144,6 +145,14 @@ def merge_films(films):
         entry["cinemas"][cinema] = film.get("url", CINEMA_URLS.get(cinema, ""))
         for st in film.get("showtimes", []):
             entry["dates"].add(st["date_iso"])
+            entry["showtimes"].append({
+                "cinema": cinema,
+                "date": st["date_iso"],
+                "time": st["time"],
+                "booking_url": st.get("booking_url", ""),
+                "sold_out": st.get("sold_out", False),
+                "attributes": st.get("attributes", []),
+            })
 
     # Sort dates chronologically and format for display
     result = []
@@ -154,6 +163,7 @@ def merge_films(films):
             datetime.strptime(d, "%Y-%m-%d").strftime("%a %d")
             for d in sorted_isos
         ]
+        entry["showtimes"].sort(key=lambda s: (s["date"], s["time"]))
         colours = AGE_RATING_COLOURS.get(entry["age_rating"], DEFAULT_RATING_COLOUR)
         entry["age_rating_bg"] = colours["bg"]
         entry["age_rating_text"] = colours["text"]
@@ -180,6 +190,7 @@ def export_json(films, path):
                 "image_url": f["image_url"],
                 "cinemas": f["cinemas"],
                 "dates": f["dates_iso"],
+                "showtimes": f["showtimes"],
             }
             for f in films
         ],
