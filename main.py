@@ -1,8 +1,10 @@
 """Cambridge Film Newsletter — scrape, enrich, render, send."""
 
 import argparse
+import difflib
 import json
 import os
+import re
 import sys
 import time
 from datetime import datetime, timezone
@@ -20,6 +22,37 @@ from scrapers import picturehouse, everyman, the_light
 # --- TMDB Enrichment ---
 
 TMDB_BASE = "https://api.themoviedb.org/3"
+TITLE_MATCH_THRESHOLD = 0.6
+
+
+def _normalise_title(t):
+    t = t.lower()
+    t = re.sub(r"[^\w\s]", " ", t)
+    t = re.sub(r"\b(the|a|an)\b", " ", t)
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def _title_similarity(query, candidate):
+    return difflib.SequenceMatcher(
+        None, _normalise_title(query), _normalise_title(candidate)
+    ).ratio()
+
+
+def _best_tmdb_match(query_title, results, limit=5):
+    """Pick the top-N result whose title best matches the query, or None."""
+    best = None
+    best_score = 0.0
+    for candidate in results[:limit]:
+        score = max(
+            _title_similarity(query_title, candidate.get("title", "")),
+            _title_similarity(query_title, candidate.get("original_title", "")),
+        )
+        if score > best_score:
+            best_score = score
+            best = candidate
+    if best_score < TITLE_MATCH_THRESHOLD:
+        return None, best_score
+    return best, best_score
 
 
 def enrich_with_tmdb(films, api_key):
@@ -49,8 +82,10 @@ def enrich_with_tmdb(films, api_key):
             results = []
 
         enrichment = {}
-        if results:
-            top = results[0]
+        top, score = _best_tmdb_match(title, results) if results else (None, 0.0)
+        if results and top is None:
+            print(f"  No confident TMDB match for '{title}' (best score {score:.2f}) — skipping enrichment")
+        if top is not None:
             movie_id = top["id"]
             overview = top.get("overview", "")
             if len(overview) > 120:
