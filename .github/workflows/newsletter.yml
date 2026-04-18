@@ -9,7 +9,7 @@ on:
         description: 'Send only to test address (not subscribers)'
         required: false
         type: boolean
-        default: false
+        default: true
 
 jobs:
   send-newsletter:
