@@ -35,6 +35,13 @@ jobs:
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
         run: python main.py ${{ github.event.inputs.test == 'true' && '--test' || '' }}
 
+      - name: Upload showings data as artifact (test runs only)
+        if: ${{ github.event.inputs.test == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: showings
+          path: data/showings.json
+
       - name: Commit updated showings data
         if: ${{ github.event.inputs.test != 'true' }}
         run: |
