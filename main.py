@@ -26,6 +26,49 @@ TITLE_MATCH_THRESHOLD = 0.6
 PLAUSIBILITY_AGE_YEARS = 3
 PLAUSIBILITY_MIN_VOTES = 100
 
+# Exact substrings stripped from cinema titles before TMDB lookup.
+# Whitelist-only: if you see a new pattern in the listings, add the exact string here.
+# Case-sensitive — list each variant you see.
+TITLE_CLEANUP_TOKENS = [
+    # Series / programming prefixes (include the trailing colon)
+    "National Theatre Live:",
+    "NT Live:",
+    "RBO Cinema Season 2025-26:",
+    "RBO Live:",
+    "RBO:",
+    "Record Store Day:",
+    "Throwback:",
+    "Toddler Club:",
+    "Beyond:",
+    # Parentheticals
+    "(2026 Re-release)",
+    "(4K Re-Release)",
+    "(4k Re-Release)",
+    "(25th Anniversary)",
+    "(Dubbed)",
+    "(Subbed)",
+    "(Hindi)",
+    "(Mandarin)",
+    "(Malayalam)",
+    "(2026)",
+    # Brackets
+    "[Subtitled]",
+    "[Dubbed]",
+    # Suffix add-ons
+    "+ Live Broadcast Q&A",
+    "+ Q&A",
+]
+
+
+def _clean_title(title):
+    """Strip known noise tokens; leaves the original intact when unmatched."""
+    cleaned = title
+    for token in TITLE_CLEANUP_TOKENS:
+        cleaned = cleaned.replace(token, "")
+    # Normalise curly quotes to straight, collapse whitespace
+    cleaned = cleaned.replace("\u2019", "'").replace("\u2018", "'")
+    return re.sub(r"\s+", " ", cleaned).strip()
+
 
 def _normalise_title(t):
     t = t.lower()
@@ -81,25 +124,26 @@ def enrich_with_tmdb(films, api_key):
     seen_titles = {}
     for film in films:
         title = film["title"]
+        query = _clean_title(title)
         # Avoid duplicate lookups for the same film at different cinemas
-        if title in seen_titles:
-            film.update(seen_titles[title])
+        if query in seen_titles:
+            film.update(seen_titles[query])
             continue
 
         try:
             resp = requests.get(
                 f"{TMDB_BASE}/search/movie",
-                params={"api_key": api_key, "query": title},
+                params={"api_key": api_key, "query": query},
                 timeout=10,
             )
             resp.raise_for_status()
             results = resp.json().get("results", [])
         except requests.RequestException as e:
-            print(f"  TMDB lookup failed for '{title}': {e}")
+            print(f"  TMDB lookup failed for '{query}': {e}")
             results = []
 
         enrichment = {}
-        top, score = _best_tmdb_match(title, results) if results else (None, 0.0)
+        top, score = _best_tmdb_match(query, results) if results else (None, 0.0)
         if results and top is None:
             print(f"  No confident TMDB match for '{title}' (best score {score:.2f}) — skipping enrichment")
         if top is not None:
@@ -133,7 +177,7 @@ def enrich_with_tmdb(films, api_key):
             except requests.RequestException:
                 pass
 
-        seen_titles[title] = enrichment
+        seen_titles[query] = enrichment
         film.update(enrichment)
 
     return films
