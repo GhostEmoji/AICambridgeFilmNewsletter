@@ -101,12 +101,20 @@ def _best_tmdb_match(query_title, results, limit=5):
     best = None
     best_score = 0.0
     for candidate in results[:limit]:
-        if not _is_plausible(candidate):
-            continue
+        plausible = _is_plausible(candidate)
         score = max(
             _title_similarity(query_title, candidate.get("title", "")),
             _title_similarity(query_title, candidate.get("original_title", "")),
         )
+        year = (candidate.get("release_date", "") or "????")[:4]
+        flag = "ok        " if plausible else "implausible"
+        print(
+            f"    [{flag}] score={score:.2f}  {candidate.get('title', '')!r} "
+            f"(orig={candidate.get('original_title', '')!r}, {year}, "
+            f"votes={candidate.get('vote_count', 0)}, id={candidate.get('id')})"
+        )
+        if not plausible:
+            continue
         if score > best_score:
             best_score = score
             best = candidate
@@ -130,6 +138,8 @@ def enrich_with_tmdb(films, api_key):
             film.update(seen_titles[query])
             continue
 
+        query_note = f" (cleaned from {title!r})" if query != title else ""
+        print(f"  TMDB lookup: {query!r}{query_note}")
         try:
             resp = requests.get(
                 f"{TMDB_BASE}/search/movie",
@@ -139,13 +149,17 @@ def enrich_with_tmdb(films, api_key):
             resp.raise_for_status()
             results = resp.json().get("results", [])
         except requests.RequestException as e:
-            print(f"  TMDB lookup failed for '{query}': {e}")
+            print(f"    lookup FAILED: {e}")
             results = []
 
         enrichment = {}
+        if not results:
+            print("    no results")
         top, score = _best_tmdb_match(query, results) if results else (None, 0.0)
         if results and top is None:
-            print(f"  No confident TMDB match for '{title}' (best score {score:.2f}) — skipping enrichment")
+            print(f"    -> no confident match (best score {score:.2f}), skipping enrichment")
+        elif top is not None:
+            print(f"    -> picked id={top.get('id')} score={score:.2f}")
         if top is not None:
             movie_id = top["id"]
             overview = top.get("overview", "")
