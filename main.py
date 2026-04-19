@@ -316,7 +316,7 @@ def send_email(html, to_emails, from_email, test=False):
     gmail_app_password = os.environ.get("GMAIL_APP_PASSWORD", "")
 
     if test:
-        recipient = "louisemclennan@gmail.com"
+        recipient = "louisemclennan@gmail.com, cambridgecinemashowings@gmail.com"
         subject = f"[TEST] Films This Week — {date_str}"
     else:
         recipient = "cambridge-cinema-showings@googlegroups.com"
