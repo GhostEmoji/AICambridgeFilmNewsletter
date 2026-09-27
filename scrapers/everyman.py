@@ -109,6 +109,10 @@ def scrape():
             continue
 
         runtime_mins = meta.get("runtime", 0) // 60 if meta.get("runtime") else None
+        directors = [
+            f"{(n.get('person') or {}).get('firstName') or ''} {(n.get('person') or {}).get('lastName') or ''}".strip()
+            for n in (meta.get("directors") or {}).get("nodes", [])
+        ]
 
         films.append({
             "title": title,
@@ -116,6 +120,12 @@ def scrape():
             "image_url": meta.get("poster", ""),
             "url": f"https://www.everymancinema.com/film-listing/{movie_id}-{slug}",
             "showtimes": week_showtimes,
+            # Hints for TMDB matching, and cinema-provided content preferred over TMDB's
+            "directors": [d for d in directors if d],
+            "runtime": runtime_mins,
+            "synopsis": ((meta.get("locale") or {}).get("synopsis") or "").strip(),
+            "poster_url": meta.get("poster", ""),
+            "certificate": "",
         })
 
     return films
@@ -124,7 +134,8 @@ def scrape():
 if __name__ == "__main__":
     results = scrape()
     for film in results:
-        print(f"\n{film['title']} ({len(film['showtimes'])} showings)")
+        print(f"\n{film['title']} ({len(film['showtimes'])} showings)"
+              f"  dir={film['directors']} runtime={film['runtime']}")
         for st in film["showtimes"][:3]:
             print(f"  {st['date']} {st['time']}")
     print(f"\nTotal: {len(results)} films")

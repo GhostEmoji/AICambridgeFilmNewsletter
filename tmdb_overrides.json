@@ -1,0 +1,4 @@
+{
+  "_help": "Fix a wrong TMDB match: map the cinema title (as shown in the Action log) to a TMDB movie id, or to null to skip TMDB for that title. Matching ignores case, punctuation and the cleanup tokens in main.py. Keys starting with _ are ignored.",
+  "_example: Some Film Title": 12345
+}

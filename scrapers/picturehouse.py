@@ -4,6 +4,8 @@ import re
 import requests
 from datetime import datetime, timedelta
 
+from bs4 import BeautifulSoup
+
 from scrapers import make_session
 
 
@@ -14,7 +16,8 @@ CINEMA_NAME = "Arts Picturehouse"
 
 def scrape():
     """Return a list of films showing at Arts Picturehouse Cambridge this week."""
-    response = make_session().post(
+    session = make_session()
+    response = session.post(
         API_URL,
         data={"cinema_id": CINEMA_ID},
         headers={
@@ -57,21 +60,65 @@ def scrape():
             continue
 
         slug = re.sub(r"[^a-z0-9]+", "-", movie["Title"].lower()).strip("-")
+        film_url = f"https://www.picturehouses.com/movie-details/{CINEMA_ID}/{movie['ScheduledFilmId']}/{slug}"
+        details = _fetch_details(session, film_url, movie["Title"])
         films.append({
             "title": movie["Title"],
             "cinema": CINEMA_NAME,
             "image_url": movie.get("image_url", ""),
-            "url": f"https://www.picturehouses.com/movie-details/{CINEMA_ID}/{movie['ScheduledFilmId']}/{slug}",
+            "url": film_url,
             "showtimes": week_showtimes,
+            # Hints for TMDB matching, and cinema-provided content preferred over TMDB's.
+            # The listing image is a 16:9 still, not a poster, so there's no poster_url.
+            "directors": details["directors"],
+            "runtime": None,
+            "synopsis": details["synopsis"],
+            "poster_url": "",
+            "certificate": details["certificate"],
         })
 
     return films
 
 
+def _fetch_details(session, url, title):
+    """Director, synopsis and certificate from the film's page. Best-effort: blanks on failure."""
+    details = {"directors": [], "synopsis": "", "certificate": ""}
+    try:
+        resp = session.get(url, headers={"User-Agent": "Mozilla/5.0 (compatible; CambridgeFilmNewsletter/1.0)"}, timeout=15)
+        resp.raise_for_status()
+    except requests.RequestException as e:
+        print(f"    Picturehouse details page failed for {title!r}: {e}")
+        return details
+    soup = BeautifulSoup(resp.text, "html.parser")
+
+    # <ul><li class="directorInner">Director :</li><li>Danny Boyle</li></ul>
+    for ul in soup.select("div.directorDiv ul"):
+        items = ul.find_all("li")
+        if len(items) < 2:
+            continue
+        label = items[0].get_text(strip=True).rstrip(":").strip().lower()
+        value = items[1].get_text(" ", strip=True)
+        if label in ("director", "directors"):
+            details["directors"] = [d.strip() for d in value.split(",") if d.strip()]
+        elif label == "certificate":
+            details["certificate"] = value
+
+    # The synopsis <p> wraps further <p>s; the first innermost one is the synopsis proper
+    # (later ones are notices like flashing-light warnings).
+    synopsis_div = soup.find("div", class_="synopsisDiv")
+    if synopsis_div:
+        for p in synopsis_div.find_all("p"):
+            if not p.find("p") and p.get_text(strip=True):
+                details["synopsis"] = p.get_text(" ", strip=True)
+                break
+    return details
+
+
 if __name__ == "__main__":
     results = scrape()
     for film in results:
-        print(f"\n{film['title']} ({len(film['showtimes'])} showings)")
+        print(f"\n{film['title']} ({len(film['showtimes'])} showings)"
+              f"  dir={film['directors']} cert={film['certificate']!r}")
         for st in film["showtimes"][:3]:
             print(f"  {st['date']} {st['time']}")
     print(f"\nTotal: {len(results)} films")

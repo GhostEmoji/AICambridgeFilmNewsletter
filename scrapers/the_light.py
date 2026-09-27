@@ -70,8 +70,14 @@ def scrape():
             continue
 
         # Find poster image (prefer .poster class)
-        img_tag = card.find("img", class_="poster") or card.find("img")
+        poster_tag = card.find("img", class_="poster")
+        img_tag = poster_tag or card.find("img")
         image_url = img_tag.get("src", "") if img_tag else ""
+
+        # "1h 41m | 12A" — either half may be missing
+        runtime, certificate = _parse_runtime_line(card.find("p", class_="runtime"))
+        summary_tag = card.find("p", class_="summary")
+        synopsis = summary_tag.get_text(" ", strip=True) if summary_tag else ""
 
         # Filter showtimes to this week
         week_showtimes = []
@@ -113,15 +119,38 @@ def scrape():
             "image_url": image_url,
             "url": film_url,
             "showtimes": week_showtimes,
+            # Hints for TMDB matching, and cinema-provided content preferred over TMDB's
+            "directors": [],
+            "runtime": runtime,
+            "synopsis": synopsis,
+            "poster_url": poster_tag.get("src", "") if poster_tag else "",
+            "certificate": certificate,
         })
 
     return films
 
 
+def _parse_runtime_line(tag):
+    """Parse '1h 41m | 12A' into (101, '12A'); missing parts come back as None / ''."""
+    if not tag:
+        return None, ""
+    runtime = None
+    certificate = ""
+    for part in tag.get_text(strip=True).split("|"):
+        part = part.strip()
+        m = re.fullmatch(r"(?:(\d+)\s*h)?\s*(?:(\d+)\s*m)?", part)
+        if part and m and (m.group(1) or m.group(2)):
+            runtime = int(m.group(1) or 0) * 60 + int(m.group(2) or 0)
+        elif part:
+            certificate = part
+    return runtime, certificate
+
+
 if __name__ == "__main__":
     results = scrape()
     for film in results:
-        print(f"\n{film['title']} ({len(film['showtimes'])} showings)")
+        print(f"\n{film['title']} ({len(film['showtimes'])} showings)"
+              f"  runtime={film['runtime']} cert={film['certificate']!r}")
         for st in film["showtimes"][:3]:
             print(f"  {st['date']} {st['time']}")
     print(f"\nTotal: {len(results)} films")

@@ -7,6 +7,7 @@ import os
 import re
 import sys
 import time
+import unicodedata
 from datetime import datetime, timezone
 
 import requests
@@ -20,11 +21,26 @@ from scrapers import picturehouse, everyman, the_light
 
 
 # --- TMDB Enrichment ---
+#
+# Cinemas give us little more than a title, so a TMDB title search often has several
+# plausible answers (remakes, re-releases, same-named films). We use whatever else the
+# cinemas tell us — director, runtime — to check a candidate before trusting it, and we
+# prefer the cinema's own synopsis/poster/certificate, which are right by definition.
+# TMDB then only contributes the rating and link (plus anything the cinemas lack).
 
 TMDB_BASE = "https://api.themoviedb.org/3"
 TITLE_MATCH_THRESHOLD = 0.6
 PLAUSIBILITY_AGE_YEARS = 3
 PLAUSIBILITY_MIN_VOTES = 100
+SEARCH_RESULT_LIMIT = 10        # search results considered per title
+MAX_CANDIDATE_CHECKS = 6        # detail lookups per title before giving up
+RUNTIME_TOLERANCE_MINS = 8      # cinema runtimes vary a little (cuts, rounding)
+DESCRIPTION_MAX_CHARS = 120
+BBFC_CERTIFICATES = {"U", "PG", "12", "12A", "15", "18", "R18"}
+
+# Manual fixes, keyed by cinema title (case/punctuation-insensitive, cleanup tokens ignored).
+# Value is a TMDB movie id to force, or null to skip TMDB for that title entirely.
+OVERRIDES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tmdb_overrides.json")
 
 # Exact substrings stripped from cinema titles before TMDB lookup.
 # Whitelist-only: if you see a new pattern in the listings, add the exact string here.
@@ -59,6 +75,18 @@ TITLE_CLEANUP_TOKENS = [
     "+ Q&A",
 ]
 
+IN_GITHUB_ACTIONS = os.environ.get("GITHUB_ACTIONS") == "true"
+
+STATUS_LABELS = {
+    "director":   ("✔", "verified by director"),
+    "runtime":    ("✔", "verified by runtime"),
+    "override":   ("↷", "manual override"),
+    "unverified": ("?", "title match only (unverified)"),
+    "rejected":   ("✘", "rejected: title matches failed checks"),
+    "no-match":   ("✘", "no TMDB match"),
+    "skipped":    ("–", "skipped (override null / no API key)"),
+}
+
 
 def _clean_title(title):
     """Strip known noise tokens; leaves the original intact when unmatched."""
@@ -66,7 +94,7 @@ def _clean_title(title):
     for token in TITLE_CLEANUP_TOKENS:
         cleaned = cleaned.replace(token, "")
     # Normalise curly quotes to straight, collapse whitespace
-    cleaned = cleaned.replace("\u2019", "'").replace("\u2018", "'")
+    cleaned = cleaned.replace("’", "'").replace("‘", "'")
     return re.sub(r"\s+", " ", cleaned).strip()
 
 
@@ -75,6 +103,11 @@ def _normalise_title(t):
     t = re.sub(r"[^\w\s]", " ", t)
     t = re.sub(r"\b(the|a|an)\b", " ", t)
     return re.sub(r"\s+", " ", t).strip()
+
+
+def _title_key(title):
+    """Key that treats 'Heart Of The Beast' and 'Heart of the Beast' as the same film."""
+    return _normalise_title(_clean_title(title))
 
 
 def _title_similarity(query, candidate):
@@ -96,104 +129,368 @@ def _is_plausible(candidate, today=None):
     return candidate.get("vote_count", 0) >= PLAUSIBILITY_MIN_VOTES
 
 
-def _best_tmdb_match(query_title, results, limit=5):
-    """Pick the top-N result whose title best matches the query, or None."""
-    best = None
-    best_score = 0.0
-    for candidate in results[:limit]:
+def _name_parts(name):
+    """'Alejandro González Iñárritu' -> ['alejandro', 'gonzalez', 'inarritu']."""
+    ascii_name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode()
+    return re.findall(r"[a-z]+", ascii_name.lower())
+
+
+def _name_tokens(name):
+    return frozenset(_name_parts(name))
+
+
+def _same_person(a, b):
+    """Tolerates word order ('Park Chan-wook'), dropped middle names and initials
+    ('Alejandro G. Iñárritu' vs 'Alejandro González Iñárritu')."""
+    ap, bp = _name_parts(a), _name_parts(b)
+    if not ap or not bp:
+        return False
+    at, bt = frozenset(ap), frozenset(bp)
+    if at <= bt or bt <= at:
+        return True
+    if ap[0] != bp[0] or ap[-1] != bp[-1]:
+        return False
+    # Same first and last name: middles must agree as initials ('g' ~ 'gonzalez'),
+    # so Paul W.S. Anderson is still not Paul Thomas Anderson
+    short, long_ = sorted((ap[1:-1], bp[1:-1]), key=len)
+    return all(any(m.startswith(s) or s.startswith(m) for m in long_) for s in short)
+
+
+def _directors_match(cinema_directors, tmdb_directors):
+    return any(_same_person(c, t) for c in cinema_directors for t in tmdb_directors)
+
+
+def _truncate(text, limit=DESCRIPTION_MAX_CHARS):
+    return text if len(text) <= limit else text[:limit - 3] + "..."
+
+
+def _year(movie):
+    return (movie.get("release_date") or "????")[:4]
+
+
+def _describe(movie):
+    return f"id={movie.get('id')} {movie.get('title', '')!r} ({_year(movie)})"
+
+
+def _load_overrides():
+    if not os.path.exists(OVERRIDES_PATH):
+        return {}
+    with open(OVERRIDES_PATH, encoding="utf-8") as fh:
+        raw = json.load(fh)
+    # Keys starting with "_" are comments
+    return {_title_key(k): v for k, v in raw.items() if not k.startswith("_")}
+
+
+def _gather_hints(films):
+    """Combine what every cinema showing this title tells us about it.
+
+    One cinema may give the director and another the runtime, so the lookup for the
+    title uses all of them. Each value remembers which cinema it came from, for the logs.
+    """
+    hints = {"directors": [], "runtime": None, "synopsis": None, "poster": None, "certificate": None}
+    for film in films:
+        cinema = film["cinema"]
+        for d in film.get("directors") or []:
+            if not any(_name_tokens(d) == _name_tokens(x) for x, _ in hints["directors"]):
+                hints["directors"].append((d, cinema))
+        if film.get("runtime") and not hints["runtime"]:
+            hints["runtime"] = (film["runtime"], cinema)
+        if film.get("synopsis") and not hints["synopsis"]:
+            hints["synopsis"] = (film["synopsis"], cinema)
+        if film.get("poster_url") and not hints["poster"]:
+            hints["poster"] = (film["poster_url"], cinema)
+        cert = (film.get("certificate") or "").strip().upper()
+        if cert in BBFC_CERTIFICATES and not hints["certificate"]:
+            hints["certificate"] = (cert, cinema)
+    return hints
+
+
+def _format_hints(hints):
+    parts = []
+    if hints["directors"]:
+        parts.append("director " + ", ".join(f"{d} ({c})" for d, c in hints["directors"]))
+    if hints["runtime"]:
+        parts.append(f"runtime {hints['runtime'][0]}m ({hints['runtime'][1]})")
+    return "; ".join(parts) if parts else "none — can only match on title"
+
+
+def _tmdb_get(path, api_key, **params):
+    resp = requests.get(f"{TMDB_BASE}{path}", params={"api_key": api_key, **params}, timeout=10)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _tmdb_details(movie_id, api_key):
+    """Full movie record with directors and release dates, in one request."""
+    return _tmdb_get(f"/movie/{movie_id}", api_key, append_to_response="credits,release_dates")
+
+
+def _verify(details, hints):
+    """Check a TMDB film against the cinema's hints.
+
+    Returns (verdict, reason); verdict is 'director', 'runtime', 'unverified' (nothing to
+    compare), or None when the film contradicts what the cinema says.
+    """
+    tmdb_directors = [
+        c["name"] for c in details.get("credits", {}).get("crew", []) if c.get("job") == "Director"
+    ]
+    tmdb_runtime = details.get("runtime") or None
+    cinema_directors = [d for d, _ in hints["directors"]]
+
+    if cinema_directors and tmdb_directors:
+        if _directors_match(cinema_directors, tmdb_directors):
+            return "director", f"director matches ({', '.join(tmdb_directors)})"
+        return None, (
+            f"director mismatch: cinema says {', '.join(cinema_directors)}, "
+            f"TMDB says {', '.join(tmdb_directors)}"
+        )
+    if hints["runtime"] and tmdb_runtime:
+        cinema_runtime = hints["runtime"][0]
+        diff = abs(cinema_runtime - tmdb_runtime)
+        if diff <= RUNTIME_TOLERANCE_MINS:
+            return "runtime", f"runtime matches ({cinema_runtime}m vs TMDB {tmdb_runtime}m)"
+        return None, (
+            f"runtime mismatch: cinema says {cinema_runtime}m, TMDB says {tmdb_runtime}m "
+            f"(tolerance ±{RUNTIME_TOLERANCE_MINS}m)"
+        )
+
+    missing = []
+    if not cinema_directors and not hints["runtime"]:
+        missing.append("cinemas gave no director or runtime")
+    if cinema_directors and not tmdb_directors:
+        missing.append("TMDB lists no director")
+    if hints["runtime"] and not tmdb_runtime:
+        missing.append("TMDB lists no runtime")
+    return "unverified", "can't verify: " + "; ".join(missing)
+
+
+def _find_match(query, results, hints, api_key, log):
+    """Pick the TMDB film for this title. Returns (details or None, status, reason)."""
+    shortlist = []
+    for candidate in results[:SEARCH_RESULT_LIMIT]:
         plausible = _is_plausible(candidate)
         score = max(
-            _title_similarity(query_title, candidate.get("title", "")),
-            _title_similarity(query_title, candidate.get("original_title", "")),
-        )
-        year = (candidate.get("release_date", "") or "????")[:4]
-        flag = "ok        " if plausible else "implausible"
-        print(
-            f"    [{flag}] score={score:.2f}  {candidate.get('title', '')!r} "
-            f"(orig={candidate.get('original_title', '')!r}, {year}, "
-            f"votes={candidate.get('vote_count', 0)}, id={candidate.get('id')})"
+            _title_similarity(query, candidate.get("title", "")),
+            _title_similarity(query, candidate.get("original_title", "")),
         )
         if not plausible:
+            flag = "implausible"
+        elif score < TITLE_MATCH_THRESHOLD:
+            flag = "title-diff "
+        else:
+            flag = "shortlist  "
+            shortlist.append((score, candidate))
+        log(
+            f"    [{flag}] score={score:.2f}  {candidate.get('title', '')!r} "
+            f"(orig={candidate.get('original_title', '')!r}, {_year(candidate)}, "
+            f"votes={candidate.get('vote_count', 0)}, id={candidate.get('id')})"
+        )
+
+    if not shortlist:
+        best = max(
+            (max(_title_similarity(query, c.get("title", "")),
+                 _title_similarity(query, c.get("original_title", "")))
+             for c in results[:SEARCH_RESULT_LIMIT]),
+            default=0.0,
+        )
+        return None, "no-match", f"no plausible result with a similar title (best score {best:.2f})"
+
+    # Stable sort keeps TMDB's popularity order among equally good titles
+    shortlist.sort(key=lambda sc: -sc[0])
+    have_hints = bool(hints["directors"] or hints["runtime"])
+    log(f"  Checking {min(len(shortlist), MAX_CANDIDATE_CHECKS)} of {len(shortlist)} shortlisted:")
+
+    fallback = None  # first candidate we couldn't verify either way
+    rejections = []
+    for _, candidate in shortlist[:MAX_CANDIDATE_CHECKS]:
+        try:
+            details = _tmdb_details(candidate["id"], api_key)
+        except requests.RequestException as e:
+            log(f"    ! {_describe(candidate)}: details lookup FAILED ({e})")
             continue
-        if score > best_score:
-            best_score = score
-            best = candidate
-    if best_score < TITLE_MATCH_THRESHOLD:
-        return None, best_score
-    return best, best_score
+        verdict, reason = _verify(details, hints)
+        mark = {"director": "✔", "runtime": "✔", "unverified": "?"}.get(verdict, "✘")
+        log(f"    {mark} {_describe(details)}: {reason}")
+        if verdict in ("director", "runtime"):
+            return details, verdict, reason
+        if verdict == "unverified":
+            if not have_hints:
+                return details, "unverified", reason  # nothing will verify; don't waste calls
+            fallback = fallback or (details, reason)
+        else:
+            rejections.append(f"{_describe(details)}: {reason}")
+
+    if fallback:
+        return fallback[0], "unverified", fallback[1]
+    return None, "rejected", "; ".join(rejections) or "all detail lookups failed"
+
+
+def _gb_certificate(details):
+    for country in details.get("release_dates", {}).get("results", []):
+        if country.get("iso_3166_1") == "GB":
+            for rel in country.get("release_dates", []):
+                if rel.get("certification"):
+                    return rel["certification"]
+    return ""
+
+
+def _build_enrichment(details, hints):
+    """Cinema-provided content first, TMDB for the rest. Returns (enrichment, source notes)."""
+    enrichment = {}
+    sources = []
+
+    if hints["synopsis"]:
+        enrichment["description"] = _truncate(hints["synopsis"][0])
+        sources.append(f"description: {hints['synopsis'][1]}")
+    elif details and details.get("overview"):
+        enrichment["description"] = _truncate(details["overview"])
+        sources.append("description: TMDB")
+
+    tmdb_poster = ""
+    if details and details.get("poster_path"):
+        tmdb_poster = f"https://image.tmdb.org/t/p/w200{details['poster_path']}"
+        enrichment["tmdb_poster"] = tmdb_poster
+    if hints["poster"]:
+        enrichment["poster"] = hints["poster"][0]
+        sources.append(f"poster: {hints['poster'][1]}")
+    elif tmdb_poster:
+        enrichment["poster"] = tmdb_poster
+        sources.append("poster: TMDB")
+
+    if hints["certificate"]:
+        enrichment["age_rating"] = hints["certificate"][0]
+        sources.append(f"cert {hints['certificate'][0]}: {hints['certificate'][1]}")
+    elif details and _gb_certificate(details):
+        enrichment["age_rating"] = _gb_certificate(details)
+        sources.append(f"cert {enrichment['age_rating']}: TMDB")
+
+    if details:
+        enrichment["rating"] = details.get("vote_average")
+        enrichment["tmdb_url"] = f"https://www.themoviedb.org/movie/{details['id']}"
+        sources.append(f"rating {details.get('vote_average') or 0:.1f}: TMDB")
+
+    return enrichment, sources
+
+
+def _emit_group(headline, lines):
+    """Print one title's log: collapsible in GitHub Actions, so the headlines scan as a list."""
+    if IN_GITHUB_ACTIONS:
+        print(f"::group::{headline}")
+        for line in lines:
+            print(line)
+        print("::endgroup::")
+    else:
+        print(headline)
+        for line in lines:
+            print(line)
+
+
+def _print_summary(outcomes):
+    """Totals, then the titles worth checking — in the log and on the Actions run page."""
+    counts = {status: 0 for status in STATUS_LABELS}
+    for o in outcomes:
+        counts[o["status"]] += 1
+
+    print(f"\nTMDB matching summary ({len(outcomes)} titles):")
+    for status, (mark, label) in STATUS_LABELS.items():
+        if counts[status]:
+            print(f"  {mark} {counts[status]:>3}  {label}")
+
+    # Unverified picks may be the wrong film; rejections may be a right film with odd data
+    risky = [o for o in outcomes if o["status"] in ("unverified", "rejected")]
+    if risky:
+        print("\nWorth a look (fix wrong ones in tmdb_overrides.json):")
+        for o in risky:
+            mark = STATUS_LABELS[o["status"]][0]
+            print(f"  {mark} {o['title']!r} [{o['cinemas']}] — {o['summary']}")
+    # Usually fine (events, foreign-language titles): cinema details are shown, just no rating
+    unmatched = [o for o in outcomes if o["status"] == "no-match"]
+    if unmatched:
+        print("\nNo TMDB match, so no rating (cinema description/poster still used):")
+        for o in unmatched:
+            print(f"  ✘ {o['title']!r} [{o['cinemas']}] — {o['summary']}")
+
+    summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not summary_path:
+        return
+    md = ["## TMDB matching", "", "| | Count |", "|---|---|"]
+    md += [f"| {STATUS_LABELS[s][0]} {STATUS_LABELS[s][1]} | {n} |" for s, n in counts.items() if n]
+    md += ["", "| | Cinema title | Cinemas | Result |", "|---|---|---|---|"]
+    # Most likely to need attention first
+    order = ["unverified", "rejected", "no-match", "override", "skipped", "runtime", "director"]
+    for o in sorted(outcomes, key=lambda o: (order.index(o["status"]), o["title"].lower())):
+        result = o["summary"].replace("|", "\\|")
+        md.append(f"| {STATUS_LABELS[o['status']][0]} | {o['title']} | {o['cinemas']} | {result} |")
+    with open(summary_path, "a", encoding="utf-8") as fh:
+        fh.write("\n".join(md) + "\n")
 
 
 def enrich_with_tmdb(films, api_key):
-    """Add TMDB overview, rating, and poster to each film."""
+    """Add description, poster, age rating (cinema first, else TMDB), plus TMDB rating and link."""
     if not api_key:
-        print("No TMDB_API_KEY set, skipping enrichment")
-        return films
+        print("No TMDB_API_KEY set: using cinema-provided details only")
+    overrides = _load_overrides()
+    if overrides:
+        print(f"Loaded {len(overrides)} TMDB override(s) from {os.path.basename(OVERRIDES_PATH)}")
 
-    seen_titles = {}
+    # Look each film up once, however many cinemas show it, using all their hints
+    groups = {}
     for film in films:
-        title = film["title"]
+        groups.setdefault(_title_key(film["title"]), []).append(film)
+    print(f"Enriching {len(films)} listings ({len(groups)} distinct titles)")
+
+    outcomes = []
+    for key, group in groups.items():
+        title = group[0]["title"]
         query = _clean_title(title)
-        # Avoid duplicate lookups for the same film at different cinemas
-        if query in seen_titles:
-            film.update(seen_titles[query])
-            continue
+        hints = _gather_hints(group)
+        cinemas = ", ".join(sorted({f["cinema"] for f in group}))
+        titles_seen = sorted({f["title"] for f in group})
+        lines = [f"  Cinema titles: {' / '.join(repr(t) for t in titles_seen)} at {cinemas}"]
+        lines.append(f"  Hints: {_format_hints(hints)}")
+        log = lines.append
 
-        query_note = f" (cleaned from {title!r})" if query != title else ""
-        print(f"  TMDB lookup: {query!r}{query_note}")
-        try:
-            resp = requests.get(
-                f"{TMDB_BASE}/search/movie",
-                params={"api_key": api_key, "query": query},
-                timeout=10,
-            )
-            resp.raise_for_status()
-            results = resp.json().get("results", [])
-        except requests.RequestException as e:
-            print(f"    lookup FAILED: {e}")
-            results = []
-
-        enrichment = {}
-        if not results:
-            print("    no results")
-        top, score = _best_tmdb_match(query, results) if results else (None, 0.0)
-        if results and top is None:
-            print(f"    -> no confident match (best score {score:.2f}), skipping enrichment")
-        elif top is not None:
-            print(f"    -> picked id={top.get('id')} score={score:.2f}")
-        if top is not None:
-            movie_id = top["id"]
-            overview = top.get("overview", "")
-            if len(overview) > 120:
-                overview = overview[:117] + "..."
-            enrichment["description"] = overview
-            enrichment["rating"] = top.get("vote_average")
-            enrichment["tmdb_url"] = f"https://www.themoviedb.org/movie/{movie_id}"
-            poster_path = top.get("poster_path")
-            if poster_path:
-                enrichment["tmdb_poster"] = f"https://image.tmdb.org/t/p/w200{poster_path}"
-
-            # Fetch GB age rating
+        details, status, reason = None, "no-match", ""
+        if key in overrides:
+            forced = overrides[key]
+            if forced is None:
+                status, reason = "skipped", "override: null (TMDB skipped on purpose)"
+            elif api_key:
+                try:
+                    details = _tmdb_details(forced, api_key)
+                    status, reason = "override", f"override: forced TMDB id {forced}"
+                except requests.RequestException as e:
+                    status, reason = "no-match", f"override id {forced} lookup FAILED: {e}"
+        elif not api_key:
+            status, reason = "skipped", "no TMDB_API_KEY"
+        else:
+            log(f"  Search {query!r}" + (f" (cleaned from {title!r})" if query != title else ""))
             try:
-                rd_resp = requests.get(
-                    f"{TMDB_BASE}/movie/{movie_id}/release_dates",
-                    params={"api_key": api_key},
-                    timeout=10,
-                )
-                rd_resp.raise_for_status()
-                for country in rd_resp.json().get("results", []):
-                    if country["iso_3166_1"] == "GB":
-                        for rel in country["release_dates"]:
-                            cert = rel.get("certification", "")
-                            if cert:
-                                enrichment["age_rating"] = cert
-                                break
-                        break
-            except requests.RequestException:
-                pass
+                results = _tmdb_get("/search/movie", api_key, query=query).get("results", [])
+            except requests.RequestException as e:
+                results = None
+                status, reason = "no-match", f"search FAILED: {e}"
+            if results == []:
+                status, reason = "no-match", "TMDB search returned no results"
+            elif results:
+                details, status, reason = _find_match(query, results, hints, api_key, log)
 
-        seen_titles[query] = enrichment
-        film.update(enrichment)
+        enrichment, sources = _build_enrichment(details, hints)
+        for film in group:
+            film.update(enrichment)
 
+        mark, _ = STATUS_LABELS[status]
+        if details:
+            summary = f"TMDB {_describe(details)} — {reason}"
+            log(f"  Result: {mark} {_describe(details)}  {enrichment['tmdb_url']}")
+        else:
+            summary = reason
+            log(f"  Result: {mark} {reason}")
+        log(f"  Using: {' · '.join(sources) if sources else 'nothing'}")
+        _emit_group(f"{mark} {title} — {summary}", lines)
+        outcomes.append({"title": title, "cinemas": cinemas, "status": status, "summary": summary})
+
+    _print_summary(outcomes)
     return films
 
 
@@ -232,6 +529,7 @@ def merge_films(films):
                 "rating": film.get("rating"),
                 "tmdb_url": film.get("tmdb_url", ""),
                 "tmdb_poster": film.get("tmdb_poster", ""),
+                "poster": film.get("poster", ""),
                 "age_rating": film.get("age_rating", ""),
                 "image_url": film.get("image_url", ""),
                 "cinemas": {},
@@ -248,6 +546,8 @@ def merge_films(films):
             entry["tmdb_url"] = film["tmdb_url"]
         if film.get("tmdb_poster") and not entry["tmdb_poster"]:
             entry["tmdb_poster"] = film["tmdb_poster"]
+        if film.get("poster") and not entry["poster"]:
+            entry["poster"] = film["poster"]
         if film.get("age_rating") and not entry["age_rating"]:
             entry["age_rating"] = film["age_rating"]
 
@@ -296,6 +596,7 @@ def export_json(films, path):
                 "rating": f["rating"],
                 "tmdb_url": f["tmdb_url"],
                 "tmdb_poster": f["tmdb_poster"],
+                "poster": f["poster"],
                 "age_rating": f["age_rating"],
                 "image_url": f["image_url"],
                 "cinemas": f["cinemas"],
@@ -407,7 +708,7 @@ def main():
         sys.exit(0)
 
     # Step 2: Enrich
-    print("Enriching with TMDB...")
+    print("Enriching with cinema details and TMDB...")
     all_films = enrich_with_tmdb(all_films, tmdb_key)
 
     # Step 3: Render
