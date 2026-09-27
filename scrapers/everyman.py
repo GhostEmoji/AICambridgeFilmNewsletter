@@ -15,6 +15,12 @@ THEATER_ID = "G02AM"
 TIMEZONE = "Europe/London"
 CINEMA_NAME = "Everyman"
 
+# The email shows posters 60px wide; 120px covers high-density screens. Originals are
+# up to 1080x1600 (~300 KB). acsta.net resizes when a size segment is put before /img/;
+# undocumented, so only URLs of exactly the expected shape are rewritten.
+POSTER_RESIZE_SEGMENT = "r_120_x"
+ACSTA_IMAGE_URL = re.compile(r"^(https://[a-z0-9.]+\.acsta\.net)/(img/.+)$")
+
 
 def scrape():
     """Return a list of films showing at Everyman Cambridge this week."""
@@ -124,11 +130,18 @@ def scrape():
             "directors": [d for d in directors if d],
             "runtime": runtime_mins,
             "synopsis": ((meta.get("locale") or {}).get("synopsis") or "").strip(),
-            "poster_url": meta.get("poster", ""),
+            # Top-level "poster" is often a 16:9 still; the localised one is the real poster
+            "poster_url": _small_poster(((meta.get("locale") or {}).get("poster") or {}).get("url") or ""),
             "certificate": "",
         })
 
     return films
+
+
+def _small_poster(url):
+    """Ask the image CDN for a thumbnail-sized copy; leaves unfamiliar URLs alone."""
+    m = ACSTA_IMAGE_URL.match(url)
+    return f"{m.group(1)}/{POSTER_RESIZE_SEGMENT}/{m.group(2)}" if m else url
 
 
 if __name__ == "__main__":
