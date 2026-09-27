@@ -42,10 +42,30 @@ BBFC_CERTIFICATES = {"U", "PG", "12", "12A", "15", "18", "R18"}
 # Value is a TMDB movie id to force, or null to skip TMDB for that title entirely.
 OVERRIDES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tmdb_overrides.json")
 
-# Exact substrings stripped from cinema titles before TMDB lookup.
-# Whitelist-only: if you see a new pattern in the listings, add the exact string here.
-# Case-sensitive — list each variant you see.
-TITLE_CLEANUP_TOKENS = [
+# Exact substrings stripped from cinema titles. Whitelist-only: if you see a new pattern
+# in the listings, add the exact string to the right list. Case-sensitive — list each
+# variant you see. A missing token is safe: the worst case is a missed TMDB match or a
+# film listed twice, never two different kinds of showing merged.
+#
+# Version tokens say nothing about who a showing is for. They're ignored both for the
+# TMDB lookup and when merging listings, so "ParaNorman (Remastered)" and "ParaNorman"
+# become one entry.
+VERSION_TOKENS = [
+    "(2026 Re-release)",
+    "(Re-release)",
+    "(4K Re-Release)",
+    "(4k Re-Release)",
+    "(4K Restoration)",
+    "(Remastered)",
+    "(25th Anniversary)",
+    "(40th Anniversary)",
+    "(2026)",
+]
+
+# Event tokens mark a showing for a particular audience or occasion (toddlers, a Q&A,
+# a language version). They're ignored for the TMDB lookup — it's the same film — but
+# kept when merging, so these showings stay separate entries in the email.
+EVENT_TOKENS = [
     # Series / programming prefixes (include the trailing colon)
     "National Theatre Live:",
     "NT Live:",
@@ -56,22 +76,17 @@ TITLE_CLEANUP_TOKENS = [
     "Throwback:",
     "Toddler Club:",
     "Beyond:",
-    # Parentheticals
-    "(2026 Re-release)",
-    "(4K Re-Release)",
-    "(4k Re-Release)",
-    "(25th Anniversary)",
+    # Language versions
     "(Dubbed)",
     "(Subbed)",
     "(Hindi)",
     "(Mandarin)",
     "(Malayalam)",
-    "(2026)",
-    # Brackets
     "[Subtitled]",
     "[Dubbed]",
     # Suffix add-ons
     "+ Live Broadcast Q&A",
+    "+ Recorded Q&A",
     "+ Q&A",
 ]
 
@@ -88,14 +103,24 @@ STATUS_LABELS = {
 }
 
 
-def _clean_title(title):
-    """Strip known noise tokens; leaves the original intact when unmatched."""
+def _strip_tokens(title, tokens):
+    """Strip the given tokens; leaves the original intact when unmatched."""
     cleaned = title
-    for token in TITLE_CLEANUP_TOKENS:
+    for token in tokens:
         cleaned = cleaned.replace(token, "")
     # Normalise curly quotes to straight, collapse whitespace
     cleaned = cleaned.replace("’", "'").replace("‘", "'")
     return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def _clean_title(title):
+    """The bare film title, for TMDB: strips version and event tokens."""
+    return _strip_tokens(title, EVENT_TOKENS + VERSION_TOKENS)
+
+
+def _strip_version(title):
+    """Drops version tokens but keeps event markers, e.g. for the merged entry's title."""
+    return _strip_tokens(title, VERSION_TOKENS)
 
 
 def _normalise_title(t):
@@ -106,8 +131,14 @@ def _normalise_title(t):
 
 
 def _title_key(title):
-    """Key that treats 'Heart Of The Beast' and 'Heart of the Beast' as the same film."""
+    """Same film: 'Heart Of The Beast' = 'Toddler Club: Heart of the Beast'. For TMDB."""
     return _normalise_title(_clean_title(title))
+
+
+def _merge_key(title):
+    """Same kind of showing: 'Sense and Sensibility (2026)' = 'Sense and Sensibility',
+    but 'Toddler Club: X' stays apart from 'X'. For merging listings across cinemas."""
+    return _normalise_title(_strip_version(title))
 
 
 def _title_similarity(query, candidate):
@@ -520,11 +551,12 @@ def merge_films(films):
     """Merge the same film across cinemas into a single entry with per-cinema info."""
     merged = {}
     for film in films:
-        # Normalise title for matching
-        key = film["title"].lower().strip()
+        # Ignores case, punctuation and version tokens, but not event markers
+        key = _merge_key(film["title"])
         if key not in merged:
             merged[key] = {
                 "title": film["title"],
+                "title_variants": [],
                 "description": film.get("description", ""),
                 "rating": film.get("rating"),
                 "tmdb_url": film.get("tmdb_url", ""),
@@ -537,6 +569,7 @@ def merge_films(films):
                 "showtimes": [],
             }
         entry = merged[key]
+        entry["title_variants"].append(film["title"])
         # Carry over TMDB data if this copy has it
         if film.get("description") and not entry["description"]:
             entry["description"] = film["description"]
@@ -566,7 +599,11 @@ def merge_films(films):
 
     # Sort dates chronologically and format for display
     result = []
+    titles_by_entry = []
     for entry in merged.values():
+        variants = entry.pop("title_variants")
+        entry["title"] = _merged_title(variants)
+        titles_by_entry.append((entry["title"], variants))
         sorted_isos = sorted(entry["dates"])
         entry["dates_iso"] = sorted_isos
         entry["dates"] = [
@@ -579,7 +616,39 @@ def merge_films(films):
         entry["age_rating_text"] = colours["text"]
         result.append(entry)
     result.sort(key=lambda f: (-len(f["dates"]), f["title"].lower()))
+    _log_merges(titles_by_entry)
     return result
+
+
+def _merged_title(variants):
+    """One cinema's title as-is; when cinemas disagree, the commonest plain version,
+    so 'Sense and Sensibility (2026)' + 'Sense and Sensibility' shows the latter."""
+    if len(set(variants)) == 1:
+        return variants[0]
+    plain = [_strip_version(v) for v in variants]
+    return max(plain, key=plain.count)  # ties go to the first seen
+
+
+def _log_merges(titles_by_entry):
+    """Show which differently-titled listings were combined, and which listings of the
+    same film were deliberately kept apart — the places a token list may need a tweak."""
+    combined = []
+    by_film = {}
+    for title, variants in titles_by_entry:
+        distinct = sorted(set(variants))
+        if len({v.casefold() for v in distinct}) > 1:  # case-only differences aren't news
+            combined.append(f"  + {' / '.join(repr(t) for t in distinct)}  ->  {title!r}")
+        by_film.setdefault(_title_key(title), []).append(title)
+    kept_apart = [
+        f"  | {' / '.join(repr(t) for t in sorted(titles))}"
+        for titles in by_film.values() if len(titles) > 1
+    ]
+    if combined:
+        print("  Merged listings with different titles:")
+        print("\n".join(combined))
+    if kept_apart:
+        print("  Same film, kept as separate entries (event/language showings):")
+        print("\n".join(kept_apart))
 
 
 # --- Export JSON ---
